@@ -38,13 +38,14 @@ import MoneyText from '../components/MoneyText';
 import StatusBadge from '../components/StatusBadge';
 import { formatMoney, formatPercent } from '../utils/format';
 import { resolveAssetUrl } from '../utils/assetUrl';
+import { PaymentGatewayMode } from '../constants/paymentGateway';
 
 interface GatewayRecord {
   id: number;
   gatewayName: string;
   providerCode: string;
   gatewayType?: string;
-  mode: string;
+  mode: PaymentGatewayMode;
   apiUrl: string;
   apiKey: string;
   apiSecret: string;
@@ -57,6 +58,7 @@ interface GatewayRecord {
   supportedMethods: string[];
   iconUrl: string;
   qrImageUrl?: string;
+  upiId: string;
   sortOrder: number;
   requireProof: number;
   additionalVerification: number;
@@ -122,12 +124,13 @@ const PaymentGatewayPage = () => {
     form.resetFields();
     form.setFieldsValue({
       gatewayType: 'ypayment',
-      mode: 'auto',
+      mode: PaymentGatewayMode.Auto,
       minAmount: 100,
       maxAmount: 50000,
       feeRate: 0,
       feeFixed: 0,
       supportedMethods: ['upi'],
+      upiId: '',
       sortOrder: 0,
       requireProof: 1,
       additionalVerification: 0,
@@ -261,9 +264,12 @@ const PaymentGatewayPage = () => {
       dataIndex: 'mode',
       key: 'mode',
       width: 100,
-      render: (v: string) => (
-        <Tag color={v === 'manual' ? 'gold' : 'green'} style={{ margin: 0 }}>
-          {v === 'manual' ? 'Manual' : 'Auto'}
+      render: (v: PaymentGatewayMode) => (
+        <Tag
+          color={v === PaymentGatewayMode.Manual ? 'gold' : 'green'}
+          style={{ margin: 0 }}
+        >
+          {v === PaymentGatewayMode.Manual ? 'Manual' : 'Auto'}
         </Tag>
       ),
     },
@@ -515,14 +521,20 @@ const PaymentGatewayPage = () => {
               >
                 <Select
                   options={[
-                    { value: 'auto', label: 'Auto — gateway API' },
-                    { value: 'manual', label: 'Manual — admin approval' },
+                    {
+                      value: PaymentGatewayMode.Auto,
+                      label: 'Auto — gateway API',
+                    },
+                    {
+                      value: PaymentGatewayMode.Manual,
+                      label: 'Manual — admin approval',
+                    },
                   ]}
                 />
               </Form.Item>
             </Col>
           </Row>
-          {selectedMode === 'manual' && (
+          {selectedMode === PaymentGatewayMode.Manual && (
             <Row gutter={16}>
               <Col span={24}>
                 <Form.Item
@@ -541,7 +553,7 @@ const PaymentGatewayPage = () => {
               </Col>
             </Row>
           )}
-          {selectedMode === 'auto' && (
+          {selectedMode === PaymentGatewayMode.Auto && (
             <Row gutter={16}>
               <Col xs={24} md={12}>
                 <Form.Item
@@ -691,6 +703,19 @@ const PaymentGatewayPage = () => {
               </Form.Item>
             </Col>
           </Row>
+          {selectedMode === PaymentGatewayMode.Manual && (
+            <Row gutter={16}>
+              <Col span={24}>
+                <Form.Item
+                  name="upiId"
+                  label="UPI ID"
+                  extra="Shown to users on the manual recharge screen with a copy button."
+                >
+                  <Input placeholder="business@upi" />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
         </Form>
       </Modal>
     </div>

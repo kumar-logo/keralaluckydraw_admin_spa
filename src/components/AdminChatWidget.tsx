@@ -95,6 +95,8 @@ const WIDTH = 384;
 const HEIGHT = 604;
 const TYPING_EMIT_MS = 1500;
 const PAGE_SIZE = 30;
+const LONG_PRESS_MS = 600;
+const LONG_PRESS_MOVE_PX = 10;
 
 const EMOJIS = [
   '😀', '😁', '😂', '🤣', '😊', '😍', '😎', '🥳', '🤔', '😐',
@@ -123,6 +125,9 @@ enum MsgAction {
   Copy = 'copy',
   Mute = 'mute',
   Delete = 'delete',
+}
+enum PointerKind {
+  Mouse = 'mouse',
 }
 
 interface ActiveConv {
@@ -257,6 +262,9 @@ const PauseGlyph = () => (
 );
 const XGlyph = () => (
   <svg viewBox="0 0 24 24" fill="none" width="16" height="16"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" /></svg>
+);
+const KebabGlyph = () => (
+  <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
 );
 const SingleTick = ({ color }: { color: string }) => (
   <svg width="15" height="11" viewBox="0 0 16 12" fill="none"><path d="M1 6.2 4.8 10 14.6 1.2" stroke={color} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" /></svg>
@@ -417,6 +425,57 @@ const Bubble = ({
   onImage: (url: string) => void;
   onQuoteClick: (id: number) => void;
 }) => {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pressTimer = useRef<number | null>(null);
+  const pressOrigin = useRef<{ x: number; y: number } | null>(null);
+  const pressFired = useRef(false);
+
+  const cancelPress = useCallback(() => {
+    if (pressTimer.current !== null) {
+      window.clearTimeout(pressTimer.current);
+      pressTimer.current = null;
+    }
+    pressOrigin.current = null;
+  }, []);
+
+  useEffect(() => cancelPress, [cancelPress]);
+
+  const startPress = (e: React.PointerEvent<HTMLDivElement>) => {
+    cancelPress();
+    pressFired.current = false;
+    if (e.pointerType === PointerKind.Mouse) return;
+    pressOrigin.current = { x: e.clientX, y: e.clientY };
+    pressTimer.current = window.setTimeout(() => {
+      pressTimer.current = null;
+      pressOrigin.current = null;
+      pressFired.current = true;
+      setMenuOpen(true);
+    }, LONG_PRESS_MS);
+  };
+
+  const trackPress = (e: React.PointerEvent<HTMLDivElement>) => {
+    const origin = pressOrigin.current;
+    if (origin === null) return;
+    if (
+      Math.abs(e.clientX - origin.x) > LONG_PRESS_MOVE_PX ||
+      Math.abs(e.clientY - origin.y) > LONG_PRESS_MOVE_PX
+    ) {
+      cancelPress();
+    }
+  };
+
+  const endPress = (e: React.TouchEvent<HTMLDivElement>) => {
+    cancelPress();
+    if (pressFired.current) e.preventDefault();
+  };
+
+  const blockPressClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!pressFired.current) return;
+    pressFired.current = false;
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
   const cls = mine
     ? 'adm-bubble adm-bubble-me'
     : isAdmin
@@ -436,24 +495,50 @@ const Bubble = ({
             : ReceiptState.Sent
       : null;
 
-  const items: MenuProps['items'] = [
-    { key: MsgAction.Reply, label: 'Reply', icon: <EnterOutlined /> },
-    ...(msg.content !== ''
-      ? [{ key: MsgAction.Copy, label: 'Copy', icon: <CopyOutlined /> }]
-      : []),
-    ...(msg.senderRole === SenderRole.User
-      ? [{ key: MsgAction.Mute, label: 'Mute user', icon: <StopOutlined /> }]
-      : []),
-    { type: 'divider' as const },
-    { key: MsgAction.Delete, label: 'Delete', icon: <DeleteOutlined />, danger: true },
-  ];
+  const menu: MenuProps = {
+    items: [
+      { key: MsgAction.Reply, label: 'Reply', icon: <EnterOutlined /> },
+      ...(msg.content !== ''
+        ? [{ key: MsgAction.Copy, label: 'Copy', icon: <CopyOutlined /> }]
+        : []),
+      ...(msg.senderRole === SenderRole.User
+        ? [{ key: MsgAction.Mute, label: 'Mute user', icon: <StopOutlined /> }]
+        : []),
+      { type: 'divider' as const },
+      { key: MsgAction.Delete, label: 'Delete', icon: <DeleteOutlined />, danger: true },
+    ],
+    onClick: (info) => onAction(info.key as MsgAction, msg),
+  };
 
   return (
-    <Dropdown
-      trigger={['contextMenu']}
-      menu={{ items, onClick: (info) => onAction(info.key as MsgAction, msg) }}
-    >
-      <div className={cls}>
+    <Dropdown trigger={['contextMenu']} menu={menu}>
+      <div
+        className={cls}
+        onPointerDown={startPress}
+        onPointerMove={trackPress}
+        onPointerUp={cancelPress}
+        onPointerCancel={cancelPress}
+        onContextMenu={cancelPress}
+        onTouchEnd={endPress}
+        onClickCapture={blockPressClick}
+      >
+        <Dropdown
+          trigger={['click']}
+          menu={menu}
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          placement={mine ? 'bottomLeft' : 'bottomRight'}
+        >
+          <button
+            type="button"
+            className="adm-kebab"
+            aria-label="Message actions"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+          >
+            <KebabGlyph />
+          </button>
+        </Dropdown>
         {reply !== null && (
           <button type="button" className="adm-quote" onClick={() => onQuoteClick(reply.id)}>
             <span className="adm-quote-name">{reply.senderName === '' ? 'Player' : reply.senderName}</span>
