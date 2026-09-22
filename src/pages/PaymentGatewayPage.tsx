@@ -503,6 +503,7 @@ const PaymentGatewayPage = () => {
                 <Select
                   options={[
                     { value: 'ypayment', label: 'YPayment (UPI gateway API)' },
+                    { value: 'payindia', label: 'PayIndia (UPI QR gateway API)' },
                     { value: 'cashfree', label: 'Cashfree' },
                     { value: 'razorpay', label: 'Razorpay' },
                     { value: 'manual', label: 'Manual (admin approval)' },
