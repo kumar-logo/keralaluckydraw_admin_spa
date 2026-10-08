@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   Row,
   Col,
@@ -103,11 +103,25 @@ interface RebuildResponse {
   slices: number;
 }
 
+const buildSlotsPath = (
+  gameId: number,
+  startDate: dayjs.Dayjs | null,
+  endDate: dayjs.Dayjs | null,
+): string => {
+  const params = new URLSearchParams();
+  if (startDate) params.set('startDate', startDate.format(DATE_FORMAT));
+  if (endDate) params.set('endDate', endDate.format(DATE_FORMAT));
+  const qs = params.toString();
+  return qs
+    ? `lottery/report/slots/${gameId}?${qs}`
+    : `lottery/report/slots/${gameId}`;
+};
+
 const TicketReportSection = () => {
   const [games, setGames] = useState<ReportGame[]>([]);
   const [gameId, setGameId] = useState<number | null>(null);
   const [drawSlots, setDrawSlots] = useState<DrawSlot[]>([]);
-  const [slotTime, setSlotTime] = useState<string>('all');
+  const [roundId, setRoundId] = useState<string>('all');
   const [digitLengths, setDigitLengths] = useState<DrawSlot[]>([]);
   const [digitLength, setDigitLength] = useState<string>('all');
   const [startDate, setStartDate] = useState<dayjs.Dayjs | null>(null);
@@ -125,29 +139,43 @@ const TicketReportSection = () => {
       .catch(() => message.error('Failed to load lotteries'));
   }, []);
 
+  const applySlotList = useCallback((list: ReportSlotList) => {
+    setDrawSlots(list.drawSlots);
+    setDigitLengths(list.digitLengths);
+    setRoundId((current) =>
+      current === 'all' || list.drawSlots.some((s) => s.value === current)
+        ? current
+        : 'all',
+    );
+  }, []);
+
   useEffect(() => {
     if (!gameId) {
       setDrawSlots([]);
       setDigitLengths([]);
       return;
     }
+    let cancelled = false;
     api
-      .get(`lottery/report/slots/${gameId}`)
+      .get(buildSlotsPath(gameId, startDate, endDate))
       .then((res) => {
-        const list = res as unknown as ReportSlotList;
-        setDrawSlots(list.drawSlots);
-        setDigitLengths(list.digitLengths);
+        if (!cancelled) applySlotList(res as unknown as ReportSlotList);
       })
       .catch(() => {
+        if (cancelled) return;
         setDrawSlots([]);
         setDigitLengths([]);
+        setRoundId('all');
       });
-  }, [gameId]);
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId, startDate, endDate, applySlotList]);
 
   const query = () => {
     const params = new URLSearchParams();
     params.set('gameId', String(gameId));
-    if (slotTime && slotTime !== 'all') params.set('slotTime', slotTime);
+    if (roundId && roundId !== 'all') params.set('roundId', roundId);
     if (digitLength && digitLength !== 'all')
       params.set('digitLength', digitLength);
     if (startDate) params.set('startDate', startDate.format('YYYY-MM-DD'));
@@ -185,10 +213,9 @@ const TicketReportSection = () => {
       })) as unknown as RebuildResponse;
       message.success(`Rollup rebuilt: ${res.slices} slices`);
       const list = (await api.get(
-        `lottery/report/slots/${gameId}`,
+        buildSlotsPath(gameId, startDate, endDate),
       )) as unknown as ReportSlotList;
-      setDrawSlots(list.drawSlots);
-      setDigitLengths(list.digitLengths);
+      applySlotList(list);
     } catch {
       message.error('Rebuild failed');
     } finally {
@@ -197,7 +224,7 @@ const TicketReportSection = () => {
   };
 
   const clear = () => {
-    setSlotTime('all');
+    setRoundId('all');
     setDigitLength('all');
     setStartDate(null);
     setEndDate(null);
@@ -232,9 +259,11 @@ const TicketReportSection = () => {
             <div style={{ fontWeight: 600, marginBottom: 6 }}>Time Slot</div>
             <Select
               style={{ width: '100%' }}
-              value={slotTime}
-              onChange={setSlotTime}
+              value={roundId}
+              onChange={setRoundId}
               disabled={!gameId}
+              showSearch
+              optionFilterProp="label"
               options={[
                 { value: 'all', label: 'All Draws' },
                 ...drawSlots.map((s) => ({

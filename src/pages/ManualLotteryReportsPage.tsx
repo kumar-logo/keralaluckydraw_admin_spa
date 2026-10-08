@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Table,
   Button,
@@ -34,11 +34,16 @@ interface ManualLotteryDraw {
   gameName: string;
   iconUrl: string | null;
   gameType: string;
-  roundNo: string;
-  phase: number;
+  firstDrawDay: string;
+  lastDrawDay: string;
+  drawCount: number;
   startDate: string | null;
-  drawDate: string | null;
-  status: number;
+  slotLabels: string[];
+}
+
+interface LoadedRange {
+  startDate: string | null;
+  endDate: string | null;
 }
 
 interface DrawSlot {
@@ -52,7 +57,6 @@ interface ReportSlotList {
   digitLengths: DrawSlot[];
 }
 
-const ALL_SLOTS = 'all';
 const ALL_DIGITS = 'all';
 
 type ReportKind = 'profit-loss' | 'number-wise';
@@ -60,18 +64,24 @@ type ReportKind = 'profit-loss' | 'number-wise';
 const buildDownloadPath = (
   kind: ReportKind,
   gameId: number,
-  roundNo: string,
-  slotTime: string,
+  roundId: string,
   digitLength: string,
 ): string => {
   const params = new URLSearchParams();
   params.set('gameId', String(gameId));
-  params.set('roundNo', roundNo);
-  if (slotTime && slotTime !== ALL_SLOTS) params.set('slotTime', slotTime);
+  params.set('roundId', roundId);
   if (digitLength && digitLength !== ALL_DIGITS)
     params.set('digitLength', digitLength);
   return `/lottery/report/${kind}/download?${params.toString()}`;
 };
+
+const formatDrawDay = (drawDay: string): string =>
+  dayjs(drawDay).format('DD MMM YYYY');
+
+const formatDrawDayRange = (first: string, last: string): string =>
+  first === last
+    ? formatDrawDay(first)
+    : `${formatDrawDay(first)} - ${formatDrawDay(last)}`;
 
 const ManualLotteryReportsPage = () => {
   const [loading, setLoading] = useState(false);
@@ -84,18 +94,27 @@ const ManualLotteryReportsPage = () => {
   const [downloading, setDownloading] = useState<string>('');
   const [startDate, setStartDate] = useState<dayjs.Dayjs | null>(dayjs());
   const [endDate, setEndDate] = useState<dayjs.Dayjs | null>(dayjs());
+  const [loadedRange, setLoadedRange] = useState<LoadedRange>({
+    startDate: null,
+    endDate: null,
+  });
 
   const loadDraws = async () => {
     setLoading(true);
     try {
+      const range: LoadedRange = {
+        startDate: startDate ? startDate.format(DATE_FORMAT) : null,
+        endDate: endDate ? endDate.format(DATE_FORMAT) : null,
+      };
       const params = new URLSearchParams();
-      if (startDate) params.set('startDate', startDate.format(DATE_FORMAT));
-      if (endDate) params.set('endDate', endDate.format(DATE_FORMAT));
+      if (range.startDate) params.set('startDate', range.startDate);
+      if (range.endDate) params.set('endDate', range.endDate);
       const qs = params.toString();
       const res = (await api.get(
         qs ? `lottery/report/manual-draws?${qs}` : 'lottery/report/manual-draws',
       )) as unknown as ManualLotteryDraw[];
       setDraws(Array.isArray(res) ? res : []);
+      setLoadedRange(range);
     } catch (err) {
       message.error(getApiErrorMessage(err, 'Failed to load manual lotteries'));
     } finally {
@@ -108,15 +127,21 @@ const ManualLotteryReportsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startDate, endDate]);
 
-  const openModal = async (draw: ManualLotteryDraw) => {
+  const openModal = useCallback(async (draw: ManualLotteryDraw) => {
     setActiveDraw(draw);
     setDigitLength(ALL_DIGITS);
     setSlots([]);
     setDigitLengths([]);
     setSlotsLoading(true);
     try {
+      const params = new URLSearchParams();
+      if (loadedRange.startDate) params.set('startDate', loadedRange.startDate);
+      if (loadedRange.endDate) params.set('endDate', loadedRange.endDate);
+      const qs = params.toString();
       const res = (await api.get(
-        `lottery/report/slots/${draw.gameId}`,
+        qs
+          ? `lottery/report/slots/${draw.gameId}?${qs}`
+          : `lottery/report/slots/${draw.gameId}`,
       )) as unknown as ReportSlotList;
       setSlots(res.drawSlots);
       setDigitLengths(res.digitLengths);
@@ -125,7 +150,7 @@ const ManualLotteryReportsPage = () => {
     } finally {
       setSlotsLoading(false);
     }
-  };
+  }, [loadedRange]);
 
   const closeModal = () => {
     setActiveDraw(null);
@@ -136,21 +161,15 @@ const ManualLotteryReportsPage = () => {
 
   const downloadOne = async (
     kind: ReportKind,
-    slotTime: string,
+    roundId: string,
     busyKey: string,
   ) => {
     if (!activeDraw) return;
     setDownloading(busyKey);
     try {
       await downloadFile(
-        buildDownloadPath(
-          kind,
-          activeDraw.gameId,
-          activeDraw.roundNo,
-          slotTime,
-          digitLength,
-        ),
-        `${kind}.pdf`,
+        buildDownloadPath(kind, activeDraw.gameId, roundId, digitLength),
+        `${kind}_${roundId}.pdf`,
       );
     } catch (err) {
       message.error(getApiErrorMessage(err, 'Download failed'));
@@ -161,32 +180,17 @@ const ManualLotteryReportsPage = () => {
 
   const downloadAllSlots = async (kind: ReportKind) => {
     if (!activeDraw) return;
+    if (slots.length === 0) {
+      message.warning('No draw time slots found for the selected dates');
+      return;
+    }
     setDownloading(`all-${kind}`);
     try {
-      if (slots.length === 0) {
+      for (const slot of slots) {
         await downloadFile(
-          buildDownloadPath(
-            kind,
-            activeDraw.gameId,
-            activeDraw.roundNo,
-            ALL_SLOTS,
-            digitLength,
-          ),
-          `${kind}.pdf`,
+          buildDownloadPath(kind, activeDraw.gameId, slot.value, digitLength),
+          `${kind}_${slot.value}.pdf`,
         );
-      } else {
-        for (const slot of slots) {
-          await downloadFile(
-            buildDownloadPath(
-              kind,
-              activeDraw.gameId,
-              activeDraw.roundNo,
-              slot.value,
-              digitLength,
-            ),
-            `${kind}_${slot.value}.pdf`,
-          );
-        }
       }
       message.success('Report download started');
     } catch (err) {
@@ -225,7 +229,7 @@ const ManualLotteryReportsPage = () => {
           <div>
             <div style={{ fontWeight: 600 }}>{row.gameName}</div>
             <Tag color="cyan" style={{ marginTop: 4 }}>
-              Phase# {row.phase}
+              {row.drawCount} {row.drawCount === 1 ? 'Draw' : 'Draws'}
             </Tag>
           </div>
         ),
@@ -239,10 +243,23 @@ const ManualLotteryReportsPage = () => {
       },
       {
         title: 'Draw Date',
-        key: 'drawDate',
-        width: 180,
+        key: 'drawDay',
+        width: 200,
         render: (_: unknown, row: ManualLotteryDraw) =>
-          formatDateTimeShort(row.drawDate),
+          formatDrawDayRange(row.firstDrawDay, row.lastDrawDay),
+      },
+      {
+        title: 'Time Slots',
+        key: 'slots',
+        render: (_: unknown, row: ManualLotteryDraw) => (
+          <Space size={[4, 4]} wrap>
+            {row.slotLabels.map((label) => (
+              <Tag key={label} color="blue">
+                {label}
+              </Tag>
+            ))}
+          </Space>
+        ),
       },
       {
         title: 'Report Pdf',
@@ -260,7 +277,7 @@ const ManualLotteryReportsPage = () => {
         ),
       },
     ],
-    [],
+    [openModal],
   );
 
   return (
@@ -297,7 +314,7 @@ const ManualLotteryReportsPage = () => {
       />
 
       <Table<ManualLotteryDraw>
-        rowKey={(row) => `${row.gameId}:${row.roundNo}`}
+        rowKey="gameId"
         columns={columns}
         dataSource={draws}
         loading={loading}
@@ -312,7 +329,7 @@ const ManualLotteryReportsPage = () => {
         footer={null}
         title={
           activeDraw
-            ? `${activeDraw.gameName} — Phase# ${activeDraw.phase}`
+            ? `${activeDraw.gameName} (${formatDrawDayRange(activeDraw.firstDrawDay, activeDraw.lastDrawDay)})`
             : 'Download Report'
         }
         width={560}
@@ -340,13 +357,14 @@ const ManualLotteryReportsPage = () => {
             )}
 
             <div style={{ fontWeight: 600, marginBottom: 8 }}>
-              Download all time slots at once
+              Download every time slot (one PDF per round)
             </div>
             <Space wrap style={{ marginBottom: 8 }}>
               <Button
                 type="primary"
                 danger
                 icon={<FilePdfOutlined />}
+                disabled={slotsLoading || slots.length === 0}
                 loading={downloading === 'all-profit-loss'}
                 onClick={() => downloadAllSlots('profit-loss')}
               >
@@ -355,6 +373,7 @@ const ManualLotteryReportsPage = () => {
               <Button
                 type="primary"
                 icon={<FileExcelOutlined />}
+                disabled={slotsLoading || slots.length === 0}
                 loading={downloading === 'all-number-wise'}
                 onClick={() => downloadAllSlots('number-wise')}
               >
@@ -362,7 +381,7 @@ const ManualLotteryReportsPage = () => {
               </Button>
             </Space>
 
-            {slots.length > 0 && (
+            {(slotsLoading || slots.length > 0) && (
               <>
                 <Divider style={{ margin: '16px 0' }} />
                 <div style={{ fontWeight: 600, marginBottom: 8 }}>
