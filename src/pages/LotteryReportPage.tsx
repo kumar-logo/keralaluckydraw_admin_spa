@@ -124,8 +124,8 @@ const TicketReportSection = () => {
   const [roundId, setRoundId] = useState<string>('all');
   const [digitLengths, setDigitLengths] = useState<DrawSlot[]>([]);
   const [digitLength, setDigitLength] = useState<string>('all');
-  const [startDate, setStartDate] = useState<dayjs.Dayjs | null>(null);
-  const [endDate, setEndDate] = useState<dayjs.Dayjs | null>(null);
+  const [startDate, setStartDate] = useState<dayjs.Dayjs | null>(dayjs());
+  const [endDate, setEndDate] = useState<dayjs.Dayjs | null>(dayjs());
   const [downloading, setDownloading] = useState<string>('');
   const [rebuilding, setRebuilding] = useState(false);
 
@@ -226,8 +226,8 @@ const TicketReportSection = () => {
   const clear = () => {
     setRoundId('all');
     setDigitLength('all');
-    setStartDate(null);
-    setEndDate(null);
+    setStartDate(dayjs());
+    setEndDate(dayjs());
   };
 
   const dateMd =
