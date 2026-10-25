@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useEffectEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Table,
@@ -17,6 +17,8 @@ import {
   InputNumber,
   Switch,
   Tabs,
+  Alert,
+  Statistic,
 } from 'antd';
 import {
   ReloadOutlined,
@@ -118,6 +120,39 @@ interface GameRow {
   } | null;
 }
 
+interface ResettleChange {
+  orderId: number;
+  orderNo: string;
+  userId: string;
+  previousStatus: number;
+  nextStatus: number;
+  previousWin: number;
+  nextWin: number;
+  delta: number;
+}
+
+interface ResettlePlan {
+  roundId: number;
+  roundNo: string;
+  totalOrders: number;
+  changedOrders: number;
+  previousPayout: number;
+  nextPayout: number;
+  creditTotal: number;
+  debitTotal: number;
+  changes: ResettleChange[];
+}
+
+interface ResettlePreview extends ResettlePlan {
+  shortfallTotal: number;
+  shortfallUsers: number;
+}
+
+interface ResettleReport extends ResettlePlan {
+  debitApplied: number;
+  debitShortfall: number;
+}
+
 interface DecisionRow {
   id: number;
   createdAt: string;
@@ -185,6 +220,11 @@ const DrawManagementPage = () => {
   const [search, setSearch] = useState('');
   const [gameType, setGameType] = useState<string | undefined>();
   const [status, setStatus] = useState<number | undefined>();
+  const [resettleRecord, setResettleRecord] = useState<DrawRecord | null>(null);
+  const [resettlePreview, setResettlePreview] =
+    useState<ResettlePreview | null>(null);
+  const [resettleLoading, setResettleLoading] = useState(false);
+  const [resettleSubmitting, setResettleSubmitting] = useState(false);
   const [tabFilter, setTabFilter] = useState<string>('all');
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(
     null,
@@ -250,8 +290,12 @@ const DrawManagementPage = () => {
     }
   };
 
-  useEffect(() => {
+  const loadInitialDraws = useEffectEvent(() => {
     fetchDraws();
+  });
+
+  useEffect(() => {
+    loadInitialDraws();
   }, []);
 
   const handleSearch = (v: string) => {
@@ -374,19 +418,51 @@ const DrawManagementPage = () => {
     });
   };
   const handleRetrySettlement = async (record: DrawRecord) => {
-    Modal.confirm({
-      title: 'Retry Settlement',
-      content: `Re-settle round ${record.roundNo}?`,
-      onOk: async () => {
-        try {
-          await api.post('settlement/retry', { roundId: record.id });
-          message.success('Settlement retried');
-          fetchDraws();
-        } catch {
-          message.error('Settlement retry failed');
-        }
-      },
-    });
+    setResettleRecord(record);
+    setResettlePreview(null);
+    setResettleLoading(true);
+    try {
+      const preview = await api.get<unknown, ResettlePreview>(
+        `settlement/${record.id}/preview`,
+      );
+      setResettlePreview(preview);
+    } catch (err) {
+      message.error(getApiErrorMessage(err, 'Could not compute the re-settlement'));
+      setResettleRecord(null);
+    } finally {
+      setResettleLoading(false);
+    }
+  };
+
+  const closeResettle = () => {
+    setResettleRecord(null);
+    setResettlePreview(null);
+  };
+
+  const confirmResettle = async () => {
+    if (!resettleRecord) return;
+    setResettleSubmitting(true);
+    try {
+      const report = await api.post<unknown, ResettleReport>(
+        'settlement/retry',
+        { roundId: resettleRecord.id },
+      );
+      const summary = `${report.changedOrders} ticket(s) changed · credited ${formatMoney(report.creditTotal)} · reversed ${formatMoney(report.debitApplied)}`;
+      if (report.debitShortfall > 0) {
+        message.warning(
+          `Re-settled — ${summary}. ${formatMoney(report.debitShortfall)} could not be recovered (insufficient balance).`,
+          8,
+        );
+      } else {
+        message.success(`Re-settled — ${summary}`);
+      }
+      closeResettle();
+      fetchDraws();
+    } catch (err) {
+      message.error(getApiErrorMessage(err, 'Re-settlement failed'));
+    } finally {
+      setResettleSubmitting(false);
+    }
   };
   const handleApprove = (record: DrawRecord) => {
     Modal.confirm({
@@ -680,7 +756,8 @@ const DrawManagementPage = () => {
               View
             </Button>
           )}
-          {record.status === 2 && (
+          {(record.status === 2 ||
+            (record.status === 1 && record.result != null)) && (
             <Button
               type="link"
               size="small"
@@ -1056,6 +1133,129 @@ const DrawManagementPage = () => {
               </div>
             )}
           </div>
+        )}
+      </Modal>
+
+      <Modal
+        title={`Re-settle — ${resettleRecord ? resettleRecord.roundNo : ''}`}
+        open={!!resettleRecord}
+        onCancel={closeResettle}
+        width={820}
+        destroyOnHidden
+        okText="Confirm Re-settle"
+        okButtonProps={{
+          danger: true,
+          disabled: !resettlePreview || resettlePreview.changedOrders === 0,
+          loading: resettleSubmitting,
+        }}
+        onOk={confirmResettle}
+      >
+        {resettleLoading || !resettlePreview ? (
+          <div style={{ padding: 24, textAlign: 'center' }}>
+            Computing re-settlement…
+          </div>
+        ) : (
+          <>
+            <p style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+              Every ticket of this round is checked again against the stored
+              draw result and the current prize rules. Only the differences
+              move money: missed wins are credited, over-paid wins are taken
+              back from the player&apos;s balance (never below zero).
+            </p>
+            <Row gutter={[12, 12]} style={{ marginBottom: 12 }}>
+              <Col xs={12} md={6}>
+                <Statistic title="Tickets" value={resettlePreview.totalOrders} />
+              </Col>
+              <Col xs={12} md={6}>
+                <Statistic
+                  title="Will change"
+                  value={resettlePreview.changedOrders}
+                />
+              </Col>
+              <Col xs={12} md={6}>
+                <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+                  Payout
+                </div>
+                <div style={{ fontWeight: 700 }}>
+                  {formatMoney(resettlePreview.previousPayout)} →{' '}
+                  {formatMoney(resettlePreview.nextPayout)}
+                </div>
+              </Col>
+              <Col xs={12} md={6}>
+                <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>
+                  Credit / Reverse
+                </div>
+                <div style={{ fontWeight: 700 }}>
+                  <MoneyText value={resettlePreview.creditTotal} variant="positive" />
+                  {' / '}
+                  <MoneyText value={-resettlePreview.debitTotal} variant="auto" />
+                </div>
+              </Col>
+            </Row>
+            {resettlePreview.changedOrders === 0 && (
+              <Alert
+                type="success"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="Settlement already matches — nothing to change."
+              />
+            )}
+            {resettlePreview.shortfallTotal > 0 && (
+              <Alert
+                type="warning"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message={`${resettlePreview.shortfallUsers} player(s) do not have enough balance — ${formatMoney(resettlePreview.shortfallTotal)} cannot be taken back and will stay with them.`}
+              />
+            )}
+            {resettlePreview.changedOrders > 0 && (
+              <Table<ResettleChange>
+                size="small"
+                rowKey="orderId"
+                dataSource={resettlePreview.changes}
+                pagination={{ pageSize: 10, showSizeChanger: false }}
+                scroll={{ x: 'max-content' }}
+                columns={[
+                  {
+                    title: 'Order',
+                    dataIndex: 'orderNo',
+                    render: (v: string) => (
+                      <span style={{ fontFamily: 'monospace', fontSize: 12 }}>
+                        {v}
+                      </span>
+                    ),
+                  },
+                  { title: 'User', dataIndex: 'userId' },
+                  {
+                    title: 'Status',
+                    key: 'status',
+                    render: (_: unknown, c: ResettleChange) => (
+                      <Space size={4}>
+                        <StatusBadge kind="order" status={c.previousStatus} />→
+                        <StatusBadge kind="order" status={c.nextStatus} />
+                      </Space>
+                    ),
+                  },
+                  {
+                    title: 'Win',
+                    key: 'win',
+                    render: (_: unknown, c: ResettleChange) => (
+                      <span>
+                        {formatMoney(c.previousWin)} → {formatMoney(c.nextWin)}
+                      </span>
+                    ),
+                  },
+                  {
+                    title: 'Change',
+                    dataIndex: 'delta',
+                    render: (v: number) => (
+                      <MoneyText value={v} variant="auto" showSign />
+                    ),
+                  },
+                ]}
+              />
+            )}
+          </>
         )}
       </Modal>
 
