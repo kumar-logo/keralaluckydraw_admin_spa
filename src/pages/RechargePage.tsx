@@ -16,6 +16,7 @@ import {
   Col,
   Tooltip,
   DatePicker,
+  Spin,
 } from 'antd';
 import {
   CheckCircleOutlined,
@@ -41,16 +42,10 @@ import {
   orDash,
   DATE_FORMAT,
 } from '../utils/format';
-import { resolveAssetUrl } from '../utils/assetUrl';
 import { canResolveRecharge } from '../utils/recharge';
 import { downloadFile } from '../services/download';
 
 const { RangePicker } = DatePicker;
-
-interface RechargeConfig {
-  proofUrl?: string;
-  [key: string]: unknown;
-}
 
 interface RechargeRecord {
   id: number;
@@ -70,9 +65,12 @@ interface RechargeRecord {
   processedBy?: string;
   createdAt: string;
   updatedAt: string;
-  configJson?: RechargeConfig | null;
-  proofUrl?: string;
+  hasProof: boolean;
   paymentRef?: string;
+}
+
+interface RechargeProofResponse {
+  proofUrl: string;
 }
 
 interface RechargeStatusCount {
@@ -146,6 +144,9 @@ const RechargePage = () => {
   }>({ pageNo: 1, pageSize: 10, search: '' });
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<RechargeRecord | null>(null);
+  const [detailProof, setDetailProof] = useState<string | null>(null);
+  const [proofLoading, setProofLoading] = useState(false);
+  const proofSeqRef = useRef(0);
   const [rejectModal, setRejectModal] = useState<{
     open: boolean;
     orderNo: string;
@@ -191,6 +192,32 @@ const RechargePage = () => {
     } finally {
       if (requestSeqRef.current === seq) setLoading(false);
     }
+  };
+
+  const openDetail = (r: RechargeRecord) => {
+    setDetailRecord(r);
+    setDetailOpen(true);
+    setDetailProof(null);
+    const seq = proofSeqRef.current + 1;
+    proofSeqRef.current = seq;
+    if (r.gatewayMode !== 'manual' || !r.hasProof) {
+      setProofLoading(false);
+      return;
+    }
+    setProofLoading(true);
+    api
+      .get<RechargeProofResponse, RechargeProofResponse>(
+        `finance/recharge/proof/${encodeURIComponent(r.orderNo)}`,
+      )
+      .then((res) => {
+        if (proofSeqRef.current === seq) setDetailProof(res.proofUrl);
+      })
+      .catch((err: Error) => {
+        if (proofSeqRef.current === seq) message.error(err.message);
+      })
+      .finally(() => {
+        if (proofSeqRef.current === seq) setProofLoading(false);
+      });
   };
 
   useEffect(() => {
@@ -294,10 +321,7 @@ const RechargePage = () => {
             danger
             style={{ padding: 0, height: 'auto' }}
             icon={<EyeOutlined />}
-            onClick={() => {
-              setDetailRecord(r);
-              setDetailOpen(true);
-            }}
+            onClick={() => openDetail(r)}
           >
             View
           </Button>
@@ -390,10 +414,7 @@ const RechargePage = () => {
             type="default"
             size="small"
             icon={<ProfileOutlined />}
-            onClick={() => {
-              setDetailRecord(record);
-              setDetailOpen(true);
-            }}
+            onClick={() => openDetail(record)}
           >
             Details
           </Button>
@@ -655,13 +676,14 @@ const RechargePage = () => {
                     Reference / UTR: <strong>{detailRecord.paymentRef}</strong>
                   </div>
                 )}
-                {detailRecord.proofUrl || detailRecord.configJson?.proofUrl ? (
+                {proofLoading ? (
+                  <div style={{ textAlign: 'center' }}>
+                    <Spin />
+                  </div>
+                ) : detailProof ? (
                   <div style={{ textAlign: 'center' }}>
                     <Image
-                      src={resolveAssetUrl(
-                        detailRecord.proofUrl ||
-                          detailRecord.configJson?.proofUrl,
-                      )}
+                      src={detailProof}
                       style={{ maxWidth: 300, borderRadius: 8 }}
                     />
                   </div>

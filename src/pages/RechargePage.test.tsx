@@ -11,6 +11,7 @@ vi.mock('../services/api', () => ({
 }));
 
 const mockedPost = vi.mocked(api.post);
+const mockedGet = vi.mocked(api.get);
 
 interface RechargeRow {
   id: number;
@@ -22,6 +23,7 @@ interface RechargeRow {
   amount: number;
   channel: string;
   gatewayMode?: string;
+  hasProof: boolean;
   status: number;
   createdAt: string;
   updatedAt: string;
@@ -43,6 +45,7 @@ const pendingRow: RechargeRow = {
   amount: 2500,
   channel: 'UPI',
   gatewayMode: 'manual',
+  hasProof: false,
   status: 0,
   createdAt: '2026-06-27T10:00:00',
   updatedAt: '2026-06-27T10:00:00',
@@ -83,6 +86,52 @@ describe('RechargePage (Deposit History)', () => {
       },
     });
     mockedPost.mockReset();
+    mockedGet.mockReset();
+  });
+
+  it('fetches the payment proof only when the detail modal opens', async () => {
+    const user = userEvent.setup();
+    const proofUrl = 'data:image/png;base64,cHJvb2Y=';
+    mockedPost.mockResolvedValueOnce(
+      listResponse([{ ...pendingRow, hasProof: true }]) as never,
+    );
+    mockedGet.mockResolvedValueOnce({ proofUrl } as never);
+
+    renderWithProviders(<RechargePage />);
+    await screen.findByText('alice');
+    expect(mockedGet).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /Details/ }));
+
+    await waitFor(() =>
+      expect(mockedGet).toHaveBeenCalledWith('finance/recharge/proof/RC-1001'),
+    );
+    const dialog = await screen.findByRole('dialog');
+    await waitFor(() =>
+      expect(
+        within(dialog)
+          .getAllByRole('img')
+          .some((img) => img.getAttribute('src') === proofUrl),
+      ).toBe(true),
+    );
+  });
+
+  it('skips the proof request when the record has no proof', async () => {
+    const user = userEvent.setup();
+    mockedPost.mockResolvedValueOnce(
+      listResponse([{ ...pendingRow, hasProof: false }]) as never,
+    );
+
+    renderWithProviders(<RechargePage />);
+    await screen.findByText('alice');
+
+    await user.click(screen.getByRole('button', { name: /Details/ }));
+
+    const dialog = await screen.findByRole('dialog');
+    expect(
+      within(dialog).getByText('No payment proof submitted.'),
+    ).toBeInTheDocument();
+    expect(mockedGet).not.toHaveBeenCalled();
   });
 
   it('loads the pending recharge queue and renders each row', async () => {
