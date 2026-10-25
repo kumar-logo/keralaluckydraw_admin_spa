@@ -116,6 +116,37 @@ describe('RechargePage (Deposit History)', () => {
     );
   });
 
+  it('filters the list by status from the status select', async () => {
+    const user = userEvent.setup();
+    mockedPost.mockResolvedValue(listResponse([pendingRow]) as never);
+
+    renderWithProviders(<RechargePage />);
+    await screen.findByText('alice');
+    expect(mockedPost).toHaveBeenLastCalledWith(
+      'finance/recharge/list',
+      expect.objectContaining({ status: undefined }),
+    );
+
+    await user.click(screen.getByRole('combobox', { name: 'Status filter' }));
+    await waitFor(() =>
+      expect(
+        document.querySelector('.ant-select-item-option[title="Pending"]'),
+      ).not.toBeNull(),
+    );
+    const option = document.querySelector<HTMLElement>(
+      '.ant-select-item-option[title="Pending"]',
+    );
+    if (!option) throw new Error('Pending option not rendered');
+    await user.click(option);
+
+    await waitFor(() =>
+      expect(mockedPost).toHaveBeenLastCalledWith(
+        'finance/recharge/list',
+        expect.objectContaining({ pageNo: 1, status: 0 }),
+      ),
+    );
+  });
+
   it('skips the proof request when the record has no proof', async () => {
     const user = userEvent.setup();
     mockedPost.mockResolvedValueOnce(

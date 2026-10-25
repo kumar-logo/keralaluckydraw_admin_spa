@@ -14,6 +14,7 @@ import {
   Col,
   Descriptions,
   DatePicker,
+  Select,
 } from 'antd';
 import {
   CheckCircleOutlined,
@@ -116,6 +117,21 @@ const STAT_CARDS: StatCardDef[] = [
   },
 ];
 
+type WithdrawStatusFilter = WithdrawStatus | 'all';
+
+interface StatusFilterOption {
+  value: WithdrawStatusFilter;
+  label: string;
+}
+
+const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
+  { value: 'all', label: 'All Status' },
+  { value: WithdrawStatus.Pending, label: 'Pending' },
+  { value: WithdrawStatus.Approved, label: 'Successful' },
+  { value: WithdrawStatus.Rejected, label: 'Rejected' },
+  { value: WithdrawStatus.Initiated, label: 'Initiated' },
+];
+
 const WithdrawPage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -127,6 +143,7 @@ const WithdrawPage = () => {
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [statusFilter, setStatusFilter] = useState<WithdrawStatusFilter>('all');
   const requestSeqRef = useRef(0);
   const queryRef = useRef<{
     pageNo: number;
@@ -134,7 +151,8 @@ const WithdrawPage = () => {
     search: string;
     startDate?: string;
     endDate?: string;
-  }>({ pageNo: 1, pageSize: 10, search: '' });
+    status: WithdrawStatusFilter;
+  }>({ pageNo: 1, pageSize: 10, search: '', status: 'all' });
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
   const [rejectOrderNo, setRejectOrderNo] = useState('');
   const [rejectRemark, setRejectRemark] = useState('');
@@ -147,6 +165,7 @@ const WithdrawPage = () => {
     q = queryRef.current.search,
     startDate = queryRef.current.startDate,
     endDate = queryRef.current.endDate,
+    status = queryRef.current.status,
   ) => {
     queryRef.current = {
       pageNo: page,
@@ -154,6 +173,7 @@ const WithdrawPage = () => {
       search: q,
       startDate,
       endDate,
+      status,
     };
     const seq = requestSeqRef.current + 1;
     requestSeqRef.current = seq;
@@ -162,6 +182,7 @@ const WithdrawPage = () => {
       const res = (await api.post('finance/withdraw/list', {
         pageNo: page,
         pageSize: size,
+        status: status === 'all' ? undefined : status,
         search: q ? q : undefined,
         startDate: startDate ? startDate : undefined,
         endDate: endDate ? endDate : undefined,
@@ -197,6 +218,19 @@ const WithdrawPage = () => {
     const start = range && range[0] ? range[0].format(DATE_FORMAT) : undefined;
     const end = range && range[1] ? range[1].format(DATE_FORMAT) : undefined;
     fetchRecords(1, pageSize, search, start, end);
+  };
+
+  const handleStatusChange = (value: WithdrawStatusFilter) => {
+    setStatusFilter(value);
+    setPageNo(1);
+    fetchRecords(
+      1,
+      pageSize,
+      search,
+      queryRef.current.startDate,
+      queryRef.current.endDate,
+      value,
+    );
   };
 
   const handleApprove = async (orderNo: string) => {
@@ -464,6 +498,15 @@ const WithdrawPage = () => {
                 handleDateChange(range as [Dayjs, Dayjs] | null)
               }
               placeholder={['Start Date', 'End Date']}
+            />
+          </Col>
+          <Col flex="180px">
+            <Select<WithdrawStatusFilter>
+              style={{ width: '100%' }}
+              aria-label="Status filter"
+              value={statusFilter}
+              onChange={handleStatusChange}
+              options={STATUS_FILTER_OPTIONS}
             />
           </Col>
           <Col>

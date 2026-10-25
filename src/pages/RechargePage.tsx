@@ -17,6 +17,7 @@ import {
   Tooltip,
   DatePicker,
   Spin,
+  Select,
 } from 'antd';
 import {
   CheckCircleOutlined,
@@ -123,6 +124,21 @@ const STAT_CARDS: StatCardDef[] = [
   },
 ];
 
+type RechargeStatusFilter = RechargeStatus | 'all';
+
+interface StatusFilterOption {
+  value: RechargeStatusFilter;
+  label: string;
+}
+
+const STATUS_FILTER_OPTIONS: StatusFilterOption[] = [
+  { value: 'all', label: 'All Status' },
+  { value: RechargeStatus.Pending, label: 'Pending' },
+  { value: RechargeStatus.Success, label: 'Successful' },
+  { value: RechargeStatus.Failed, label: 'Rejected' },
+  { value: RechargeStatus.Initiated, label: 'Initiated' },
+];
+
 const RechargePage = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -134,6 +150,7 @@ const RechargePage = () => {
   const [pageSize, setPageSize] = useState(10);
   const [search, setSearch] = useState('');
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
+  const [statusFilter, setStatusFilter] = useState<RechargeStatusFilter>('all');
   const requestSeqRef = useRef(0);
   const queryRef = useRef<{
     pageNo: number;
@@ -141,7 +158,8 @@ const RechargePage = () => {
     search: string;
     startDate?: string;
     endDate?: string;
-  }>({ pageNo: 1, pageSize: 10, search: '' });
+    status: RechargeStatusFilter;
+  }>({ pageNo: 1, pageSize: 10, search: '', status: 'all' });
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<RechargeRecord | null>(null);
   const [detailProof, setDetailProof] = useState<string | null>(null);
@@ -159,6 +177,7 @@ const RechargePage = () => {
     q = queryRef.current.search,
     startDate = queryRef.current.startDate,
     endDate = queryRef.current.endDate,
+    status = queryRef.current.status,
   ) => {
     queryRef.current = {
       pageNo: page,
@@ -166,6 +185,7 @@ const RechargePage = () => {
       search: q,
       startDate,
       endDate,
+      status,
     };
     const seq = requestSeqRef.current + 1;
     requestSeqRef.current = seq;
@@ -174,6 +194,7 @@ const RechargePage = () => {
       const res = (await api.post('finance/recharge/list', {
         pageNo: page,
         pageSize: size,
+        status: status === 'all' ? undefined : status,
         search: q ? q : undefined,
         startDate: startDate ? startDate : undefined,
         endDate: endDate ? endDate : undefined,
@@ -266,6 +287,19 @@ const RechargePage = () => {
     const start = range && range[0] ? range[0].format(DATE_FORMAT) : undefined;
     const end = range && range[1] ? range[1].format(DATE_FORMAT) : undefined;
     fetchRecords(1, pageSize, search, start, end);
+  };
+
+  const handleStatusChange = (value: RechargeStatusFilter) => {
+    setStatusFilter(value);
+    setPageNo(1);
+    fetchRecords(
+      1,
+      pageSize,
+      search,
+      queryRef.current.startDate,
+      queryRef.current.endDate,
+      value,
+    );
   };
 
   const handleExportApproved = async () => {
@@ -522,6 +556,15 @@ const RechargePage = () => {
                 handleDateChange(range as [Dayjs, Dayjs] | null)
               }
               placeholder={['Start Date', 'End Date']}
+            />
+          </Col>
+          <Col flex="180px">
+            <Select<RechargeStatusFilter>
+              style={{ width: '100%' }}
+              aria-label="Status filter"
+              value={statusFilter}
+              onChange={handleStatusChange}
+              options={STATUS_FILTER_OPTIONS}
             />
           </Col>
           <Col>

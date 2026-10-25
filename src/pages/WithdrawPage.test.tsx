@@ -117,6 +117,37 @@ describe('WithdrawPage (Withdraw History)', () => {
     expect(screen.getByText('HDFC')).toBeInTheDocument();
   });
 
+  it('filters the list by status from the status select', async () => {
+    const user = userEvent.setup();
+    mockedPost.mockResolvedValue(listResponse([pendingWithdraw]) as never);
+
+    renderWithProviders(<WithdrawPage />);
+    await screen.findByText('bob');
+    expect(mockedPost).toHaveBeenLastCalledWith(
+      'finance/withdraw/list',
+      expect.objectContaining({ status: undefined }),
+    );
+
+    await user.click(screen.getByRole('combobox', { name: 'Status filter' }));
+    await waitFor(() =>
+      expect(
+        document.querySelector('.ant-select-item-option[title="Pending"]'),
+      ).not.toBeNull(),
+    );
+    const option = document.querySelector<HTMLElement>(
+      '.ant-select-item-option[title="Pending"]',
+    );
+    if (!option) throw new Error('Pending option not rendered');
+    await user.click(option);
+
+    await waitFor(() =>
+      expect(mockedPost).toHaveBeenLastCalledWith(
+        'finance/withdraw/list',
+        expect.objectContaining({ pageNo: 1, status: 0 }),
+      ),
+    );
+  });
+
   it('shows the pending total reflecting the withdrawal amount in the stat cards', async () => {
     mockedPost.mockResolvedValueOnce(listResponse([pendingWithdraw]) as never);
 
