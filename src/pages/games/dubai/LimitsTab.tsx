@@ -4,6 +4,11 @@ import { ClockCircleOutlined, MinusCircleOutlined, PlusOutlined, SaveOutlined } 
 import dayjs from 'dayjs';
 import api from '../../../services/api';
 import { getApiErrorMessage } from '../../../utils/apiError';
+import {
+  confirmDrawTimeRemoval,
+  liveDrawTimes,
+  removedDrawTimes,
+} from '../../../utils/drawTimeRemoval';
 import PageLoader from '../../../components/PageLoader';
 import { useConfigStore } from '../../../store/configStore';
 import { DEFAULT_STOP_BET_BEFORE, DEFAULT_DRAW_INTERVAL, DEFAULT_DRAW_DELAY, type GameDetail, type ScheduleResponse } from './dubaiShared';
@@ -30,6 +35,7 @@ const LimitsTab = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savedDrawTimes, setSavedDrawTimes] = useState<dayjs.Dayjs[]>([]);
   const autoGenerate = Form.useWatch('autoGenerate', form);
 
   const load = useCallback(async () => {
@@ -37,6 +43,8 @@ const LimitsTab = ({
     try {
       const res = (await api.get(`schedule/${detail.id}`)) as ScheduleResponse;
       const c = res.config ? res.config : {};
+      const drawTimes = liveDrawTimes(c.scheduledDrawTimes);
+      setSavedDrawTimes(drawTimes);
       form.setFieldsValue({
         drawInterval:
           c.roundDuration ||
@@ -47,12 +55,7 @@ const LimitsTab = ({
           c.stopBetBefore ?? detail.stopBetBeforeSec ?? DEFAULT_STOP_BET_BEFORE,
         drawDelay: c.drawDelay ?? detail.drawDelaySec ?? DEFAULT_DRAW_DELAY,
         autoGenerate: c.autoGenerate !== false,
-        scheduledDrawTimes:
-          Array.isArray(c.scheduledDrawTimes) && c.scheduledDrawTimes.length
-            ? c.scheduledDrawTimes.map((t) => dayjs(t))
-            : c.scheduledDrawTime
-              ? [dayjs(c.scheduledDrawTime)]
-              : undefined,
+        scheduledDrawTimes: [...drawTimes],
         startDate: c.startDate ? dayjs(c.startDate) : null,
       });
     } catch {
@@ -82,6 +85,14 @@ const LimitsTab = ({
         isManual && v.startDate
           ? (v.startDate as { toISOString: () => string }).toISOString()
           : null;
+      if (
+        isManual &&
+        !(await confirmDrawTimeRemoval(
+          removedDrawTimes(savedDrawTimes, v.scheduledDrawTimes),
+        ))
+      ) {
+        return;
+      }
       setSaving(true);
       const roundDuration = isManual ? 0 : v.drawInterval;
       await api.post(`schedule/${detail.id}`, {
@@ -97,7 +108,7 @@ const LimitsTab = ({
       reload();
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return;
-      message.error('Save failed');
+      message.error(getApiErrorMessage(e, 'Save failed'));
     } finally {
       setSaving(false);
     }

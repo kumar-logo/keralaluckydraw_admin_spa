@@ -111,7 +111,6 @@ export interface ScheduleResponse {
     stopBetBefore?: number;
     drawDelay?: number;
     autoGenerate?: boolean;
-    scheduledDrawTime?: string | null;
     scheduledDrawTimes?: string[] | null;
     startDate?: string | null;
   };

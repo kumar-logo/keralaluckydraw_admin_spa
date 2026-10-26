@@ -33,6 +33,11 @@ import dayjs from 'dayjs';
 import api from '../../../services/api';
 import { toScheduleConfigForm } from '../../../services/scheduleConfig';
 import { getApiErrorMessage } from '../../../utils/apiError';
+import {
+  confirmDrawTimeRemoval,
+  liveDrawTimes,
+  removedDrawTimes,
+} from '../../../utils/drawTimeRemoval';
 import PageLoader from '../../../components/PageLoader';
 import {
   SLAT_POSITION_ORDER,
@@ -88,7 +93,7 @@ const ConfigTab = ({
   const [positionColorRows, setPositionColorRows] = useState<
     PositionColorRow[]
   >([]);
-
+  const [savedDrawTimes, setSavedDrawTimes] = useState<dayjs.Dayjs[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +104,8 @@ const ConfigTab = ({
       const scalar = cfg.scalar || {};
       const sched: ScheduleResponse = await api.get(`schedule/${detail.id}`);
       const sc = sched.config;
+      const drawTimes = liveDrawTimes(sc?.scheduledDrawTimes);
+      setSavedDrawTimes(drawTimes);
       form.setFieldsValue({
         digitCount: scalar.digitCount ?? detail.digitCount,
         maxPrize: scalar.maxPrize ?? detail.maxPrize,
@@ -114,12 +121,7 @@ const ConfigTab = ({
         sortOrder: detail.sortOrder ?? 0,
         canInsurance: !!cfg.punjab?.canInsurance,
         ...toScheduleConfigForm(sched),
-        scheduledDrawTimes:
-          Array.isArray(sc?.scheduledDrawTimes) && sc.scheduledDrawTimes.length
-            ? sc.scheduledDrawTimes.map((t) => dayjs(t))
-            : sc?.scheduledDrawTime
-              ? [dayjs(sc.scheduledDrawTime)]
-              : undefined,
+        scheduledDrawTimes: [...drawTimes],
         startDate: sc?.startDate ? dayjs(sc.startDate) : null,
       });
       setPrizeTiers(
@@ -258,6 +260,14 @@ const ConfigTab = ({
           ? (v.startDate as dayjs.Dayjs).toISOString()
           : null;
       const roundDuration = isManual ? 0 : v.drawInterval;
+      if (
+        isManual &&
+        !(await confirmDrawTimeRemoval(
+          removedDrawTimes(savedDrawTimes, v.scheduledDrawTimes),
+        ))
+      ) {
+        return;
+      }
       setSavingSchedule(true);
       await api.post(`schedule/${detail.id}`, {
         roundDuration,
@@ -272,7 +282,7 @@ const ConfigTab = ({
       reload();
     } catch (e) {
       if ((e as { errorFields?: unknown })?.errorFields) return;
-      message.error('Schedule save failed');
+      message.error(getApiErrorMessage(e, 'Schedule save failed'));
     } finally {
       setSavingSchedule(false);
     }

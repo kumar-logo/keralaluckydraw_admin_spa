@@ -4,6 +4,12 @@ import { CalendarOutlined, MinusCircleOutlined, PlusOutlined, SaveOutlined } fro
 import dayjs, { Dayjs } from 'dayjs';
 import api from '../../../services/api';
 import { toScheduleConfigForm } from '../../../services/scheduleConfig';
+import { getApiErrorMessage } from '../../../utils/apiError';
+import {
+  confirmDrawTimeRemoval,
+  liveDrawTimes,
+  removedDrawTimes,
+} from '../../../utils/drawTimeRemoval';
 import { INTERVAL_OPTIONS, cardStyle, formLayout, type GameDetail, type ScheduleResponse } from './keralaShared';
 
 const ScheduleTab = ({
@@ -16,6 +22,7 @@ const ScheduleTab = ({
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savedDrawTimes, setSavedDrawTimes] = useState<Dayjs[]>([]);
   const autoGenerate = Form.useWatch('autoGenerate', form);
 
   const load = useCallback(async () => {
@@ -23,14 +30,11 @@ const ScheduleTab = ({
     try {
       const res = (await api.get(`schedule/${detail.id}`)) as ScheduleResponse;
       const c = res.config;
-      const scheduledDrawTimes = Array.isArray(c?.scheduledDrawTimes)
-        ? c.scheduledDrawTimes.filter(Boolean).map((t) => dayjs(t))
-        : c?.scheduledDrawTime
-          ? [dayjs(c.scheduledDrawTime)]
-          : [];
+      const scheduledDrawTimes = liveDrawTimes(c?.scheduledDrawTimes);
+      setSavedDrawTimes(scheduledDrawTimes);
       form.setFieldsValue({
         ...toScheduleConfigForm(res),
-        scheduledDrawTimes,
+        scheduledDrawTimes: [...scheduledDrawTimes],
         startDate: c?.startDate ? dayjs(c.startDate) : null,
       });
     } catch {
@@ -47,8 +51,16 @@ const ScheduleTab = ({
   const save = async () => {
     try {
       const v = await form.validateFields();
-      setSaving(true);
       const isManual = v.autoGenerate === false;
+      if (
+        isManual &&
+        !(await confirmDrawTimeRemoval(
+          removedDrawTimes(savedDrawTimes, v.scheduledDrawTimes),
+        ))
+      ) {
+        return;
+      }
+      setSaving(true);
       const scheduledDrawTimes =
         isManual && Array.isArray(v.scheduledDrawTimes)
           ? (v.scheduledDrawTimes as Dayjs[])
@@ -71,7 +83,7 @@ const ScheduleTab = ({
       load();
     } catch (e) {
       if ((e as { errorFields?: unknown }).errorFields) return;
-      message.error('Save failed');
+      message.error(getApiErrorMessage(e, 'Save failed'));
     } finally {
       setSaving(false);
     }
